@@ -1,19 +1,53 @@
 import * as THREE from 'three'
 
-/** Tuzilma o'lchamlari (dunyo birligi = 1 metr). */
+/**
+ * Tuzilma o'lchamlari (dunyo birligi = 1 metr).
+ *
+ * Blok markazlari `CELL` oralig'ida, ko'cha markazlari esa qo'shni blok
+ * markazlarining O'RTASIDA (CELL/2 siljish bilan) joylashadi. Shu tarzda
+ * `CELL = BLOCK + ROAD` tengligi saqlanadi va trotuyar bilan ko'cha orasida
+ * bo'sh (unpaved) bo'lak qolmaydi.
+ */
 export const CITY = {
-  /** Blok tarmog'i: har bir kvadrat katak bitta blok. */
+  /** Blok/ko'cha tarmog'i. */
   GRID: 11,
-  /** Kvadrat orasidagi masofa (markazdan markazgacha). */
+  /** Kvadrat o'lchami. */
   BLOCK: 26,
-  /** Yo'l kengligi. */
+  /** Ko'cha kengligi. */
   ROAD: 12,
+  /** Blok markazlari orasidagi masofa. */
   get CELL() {
     return this.BLOCK + this.ROAD
   },
+  /** Shahar yarim kengligi (chegara). */
   get HALF() {
-    return ((this.GRID - 1) / 2) * this.CELL
+    return ((this.GRID - 1) / 2) * this.CELL + this.CELL / 2
   },
+}
+
+/** i-chindagi blok yoki ko'cha markazining koordinatasi. */
+export function axisAt(i: number, cell: number, grid: number): number {
+  return (i - (grid - 1) / 2) * cell
+}
+
+/**
+ * Ko'cha markazlari: har bir qo'shni blok markazi orasida bittadan.
+ * Natija har bir yo'lda bitta aniq markaz bo'ladi (ikki qo'shni yo'l
+ * bitta markazga to'g'ramasligi uchun `i` juftlab qadamlaydi).
+ */
+export function roadCenters(cell: number, grid: number): number[] {
+  const out: number[] = []
+  for (let i = 0; i <= grid; i += 2) {
+    out.push(axisAt(i, cell, grid) - cell / 2)
+  }
+  return out
+}
+
+/** Blok markazlari (bino va trotuyar shu yerda turadi). */
+export function blockCenters(cell: number, grid: number): number[] {
+  const out: number[] = []
+  for (let i = 0; i < grid; i++) out.push(axisAt(i, cell, grid))
+  return out
 }
 
 /** Bino uchun arzon deterministik tasodifiylik (seeded PRNG). */
@@ -25,19 +59,20 @@ function makeRandom(seed: number) {
   }
 }
 
-/** Blok ichidagi binolarni bitta guruh (merged) geometriya sifatida quradi. */
 export interface CityResult {
   group: THREE.Group
-  /** Ko'chada olib ketadigan binolarning AABB ro'yxati. */
+  /** Bino chegaralari — to'qnashuv uchun AABB ro'yxati. */
   obstacles: { minX: number; maxX: number; minZ: number; maxZ: number }[]
-  /** Ko'chalar markazining X koordinatalari. */
-  roadLines: number[]
+  /** Ko'cha markazlari (spawn va marker joylashuvi uchun). */
+  roads: number[]
+  /** Blok markazlari. */
+  blocks: number[]
 }
 
 const BUILDING_PALETTE = [
-  0x2f5d8a, // ko'k
-  0x35506e, // to'q ko'k
-  0x4a5a72, // kulrang-ko'k
+  0x2f5d8a,
+  0x35506e,
+  0x4a5a72,
   0x3a4a63,
   0x274b6d,
   0x40566e,
@@ -49,70 +84,35 @@ export function buildCity(seed = 20240711): CityResult {
   const rand = makeRandom(seed)
   const group = new THREE.Group()
   const obstacles: CityResult['obstacles'] = []
+  const cell = CITY.CELL
+  const roads = roadCenters(cell, CITY.GRID)
+  const blocks = blockCenters(cell, CITY.GRID)
 
-  // ---------- Yer va ko'cha qatlamlari ----------
-  const groundMat = new THREE.MeshStandardMaterial({
-    color: 0x2b3242,
-    roughness: 1,
-    metalness: 0,
-  })
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), groundMat)
-  ground.rotation.x = -Math.PI / 2
-  ground.receiveShadow = true
-  group.add(ground)
-
-  // Ko'cha qatlami: katta to'q ko'k yuzani qo'yamiz va har bir katak
-  // uchun quyuqroq "yo'l" plitasini joylaymiz — shunda chekka chiziqlar aniq ko'rinadi.
+  // ---------- Ko'cha yuzasi (butun shahar bo'ylab) ----------
   const roadMat = new THREE.MeshStandardMaterial({
     color: 0x1d2330,
     roughness: 0.92,
     metalness: 0.02,
   })
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), roadMat)
+  ground.rotation.x = -Math.PI / 2
+  ground.receiveShadow = true
+  group.add(ground)
+
   const sidewalkMat = new THREE.MeshStandardMaterial({
     color: 0x8d9bb0,
     roughness: 0.95,
   })
 
-  for (let i = 0; i < CITY.GRID; i++) {
-    for (let j = 0; j < CITY.GRID; j++) {
-      const cx = (i - (CITY.GRID - 1) / 2) * CITY.CELL
-      const cz = (j - (CITY.GRID - 1) / 2) * CITY.CELL
+  // ---------- Bloklar: har biri trotuvar + 1..3 bino ----------
+  const buildingGeoms: THREE.BufferGeometry[] = []
+  const roofGeoms: THREE.BufferGeometry[] = []
+  const winGeoms: THREE.BufferGeometry[] = []
+  const dashGeoms: THREE.BufferGeometry[] = []
 
-      // Yo'l to'shagi (har 2-katakda, uzun yo'llar uchun)
-      if (i % 2 === 0) {
-        const slab = new THREE.Mesh(
-          new THREE.PlaneGeometry(CITY.ROAD, CITY.CELL + CITY.ROAD),
-          roadMat,
-        )
-        slab.rotation.x = -Math.PI / 2
-        slab.position.set(cx, 0.01, cz)
-        slab.receiveShadow = true
-        group.add(slab)
-      }
-      if (j % 2 === 0) {
-        const slab = new THREE.Mesh(
-          new THREE.PlaneGeometry(CITY.CELL + CITY.ROAD, CITY.ROAD),
-          roadMat,
-        )
-        slab.rotation.x = -Math.PI / 2
-        slab.position.set(cx, 0.01, cz)
-        slab.receiveShadow = true
-        group.add(slab)
-      }
-
-      // Kengaytirilgan chorraha kataklari
-      if (i % 2 === 0 && j % 2 === 0) {
-        const plaza = new THREE.Mesh(
-          new THREE.PlaneGeometry(CITY.ROAD, CITY.ROAD),
-          roadMat,
-        )
-        plaza.rotation.x = -Math.PI / 2
-        plaza.position.set(cx, 0.02, cz)
-        plaza.receiveShadow = true
-        group.add(plaza)
-      }
-
-      // Trotuarlar (kvadratning chetlari bo'ylab)
+  for (const cx of blocks) {
+    for (const cz of blocks) {
+      // Trotuvar plitasi — blok o'lchamida, ko'cha chetlariga tegib turadi
       const sidewalk = new THREE.Mesh(
         new THREE.BoxGeometry(CITY.BLOCK, 0.18, CITY.BLOCK),
         sidewalkMat,
@@ -120,61 +120,45 @@ export function buildCity(seed = 20240711): CityResult {
       sidewalk.position.set(cx, 0.09, cz)
       sidewalk.receiveShadow = true
       group.add(sidewalk)
-    }
-  }
 
-  // ---------- Binolar ----------
-  // Har bir blok ichida 1-3 bino quramiz (ichki bo'shliq qoldiramiz).
-  const buildingGeoms: THREE.BufferGeometry[] = []
-  const roofGeoms: THREE.BufferGeometry[] = []
-  const winGeoms: THREE.BufferGeometry[] = []
-
-  for (let i = 0; i < CITY.GRID; i++) {
-    for (let j = 0; j < CITY.GRID; j++) {
-      const cx = (i - (CITY.GRID - 1) / 2) * CITY.CELL
-      const cz = (j - (CITY.GRID - 1) / 2) * CITY.CELL
-
+      // 1-3 bino (markazda balandroq, chetlarda past — gorizont chiziladi)
       const lots = rand() < 0.35 ? 2 : 1
-      for (let k = 0; k < lots; k++) {
-        // Bino o'lchamlari
-        const w = 7 + rand() * 8
-        const d = 7 + rand() * 8
-        // Markaziy qismda balandroq, chetlarda past — ko'cha gorizonti uchun
-        const distFromCenter = Math.hypot(i - (CITY.GRID - 1) / 2, j - (CITY.GRID - 1) / 2)
-        const heightBias = Math.max(0, 1 - distFromCenter / (CITY.GRID / 2))
-        const h = 8 + rand() * 26 + heightBias * rand() * 46
 
-        // Lot ichidagi joylashuv
-        const offX = lots === 1 ? 0 : (k === 0 ? -4.5 : 4.5)
-        const offZ = (rand() - 0.5) * 3
+      for (let k = 0; k < lots; k++) {
+        const w = 8 + rand() * 7
+        const d = 8 + rand() * 7
+        // Markazga yaqinlik bo'yicha balandlik
+        const centrality = 1 - Math.min(1, Math.hypot(cx, cz) / CITY.HALF)
+        const h = 10 + rand() * 24 + centrality * rand() * 48
+
+        const offX = lots === 1 ? 0 : k === 0 ? -4.6 : 4.6
+        const offZ = (rand() - 0.5) * 2
         const x = cx + offX
         const z = cz + offZ
 
-        // Bimoli bino
+        // --- Bino korpusi ---
         const geo = new THREE.BoxGeometry(w, h, d)
         geo.translate(x, h / 2 + 0.18, z)
-        buildingGeoms.push(geo)
-
-        // Shift: har binoga boshqa rang (material orqali emas, attribute orqali)
-        const colors = new Float32Array(geo.attributes.position.count * 3)
         const c = new THREE.Color(
           BUILDING_PALETTE[Math.floor(rand() * BUILDING_PALETTE.length)],
         )
+        const colors = new Float32Array(geo.attributes.position.count * 3)
         for (let v = 0; v < geo.attributes.position.count; v++) {
           colors[v * 3] = c.r
           colors[v * 3 + 1] = c.g
           colors[v * 3 + 2] = c.b
         }
         geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+        buildingGeoms.push(geo)
 
-        // Tom qatlami
+        // --- Tom ---
         const roof = new THREE.BoxGeometry(w + 0.5, 0.6, d + 0.5)
         roof.translate(x, h + 0.45, z)
         roofGeoms.push(roof)
 
-        // Deraza chizig'i (yorqin neon lenta)
+        // --- Deraza lentalari ---
         for (let wy = 3; wy < h - 1.5; wy += 3.2) {
-          const band = new THREE.BoxGeometry(w + 0.12, 0.28, d + 0.12)
+          const band = new THREE.BoxGeometry(w + 0.12, 0.3, d + 0.12)
           band.translate(x, wy + 0.18, z)
           winGeoms.push(band)
         }
@@ -189,15 +173,17 @@ export function buildCity(seed = 20240711): CityResult {
     }
   }
 
-  // Geometriyalarni birlashtirish (performance uchun)
+  // ---------- Geometriyalarni birlashtirish (performance) ----------
   const mergedBuildings = mergeGeometries(buildingGeoms)
   if (mergedBuildings) {
-    const mat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.72,
-      metalness: 0.12,
-    })
-    const mesh = new THREE.Mesh(mergedBuildings, mat)
+    const mesh = new THREE.Mesh(
+      mergedBuildings,
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.72,
+        metalness: 0.12,
+      }),
+    )
     mesh.castShadow = true
     mesh.receiveShadow = true
     group.add(mesh)
@@ -205,56 +191,48 @@ export function buildCity(seed = 20240711): CityResult {
 
   const mergedRoofs = mergeGeometries(roofGeoms)
   if (mergedRoofs) {
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x1a2130,
-      roughness: 0.85,
-    })
-    const mesh = new THREE.Mesh(mergedRoofs, mat)
+    const mesh = new THREE.Mesh(
+      mergedRoofs,
+      new THREE.MeshStandardMaterial({ color: 0x1a2130, roughness: 0.85 }),
+    )
     mesh.castShadow = true
     group.add(mesh)
   }
 
   const mergedWindows = mergeGeometries(winGeoms)
   if (mergedWindows) {
-    const mat = new THREE.MeshBasicMaterial({ color: WINDOW_COLOR })
-    const mesh = new THREE.Mesh(mergedWindows, mat)
-    group.add(mesh)
+    group.add(
+      new THREE.Mesh(mergedWindows, new THREE.MeshBasicMaterial({ color: WINDOW_COLOR })),
+    )
   }
 
-  // ---------- Ko'cha chiziqlari ----------
-  const lineMat = new THREE.MeshBasicMaterial({ color: 0xd8e0ea })
-  const dashGeoms: THREE.BufferGeometry[] = []
-  for (let i = 0; i < CITY.GRID; i += 2) {
-    const cx = (i - (CITY.GRID - 1) / 2) * CITY.CELL
-    // Vertikal yo'l chizig'i (X = cx), Z bo'ylab
-    for (let z = -CITY.HALF; z < CITY.HALF; z += 6) {
+  // ---------- Ko'cha chiziqlari (faqat ko'cha markazlarida) ----------
+  const limit = CITY.HALF
+  for (const r of roads) {
+    for (let z = -limit; z < limit; z += 6) {
       const g = new THREE.PlaneGeometry(0.4, 3)
       g.rotateX(-Math.PI / 2)
-      g.translate(cx, 0.04, z)
+      g.translate(r, 0.05, z)
       dashGeoms.push(g)
     }
-    // Gorizontal yo'l chizig'i (Z = cx), X bo'ylab
-    for (let x = -CITY.HALF; x < CITY.HALF; x += 6) {
+    for (let x = -limit; x < limit; x += 6) {
       const g = new THREE.PlaneGeometry(3, 0.4)
       g.rotateX(-Math.PI / 2)
-      g.translate(x, 0.04, cx)
+      g.translate(x, 0.05, r)
       dashGeoms.push(g)
     }
   }
   const mergedDash = mergeGeometries(dashGeoms)
   if (mergedDash) {
-    group.add(new THREE.Mesh(mergedDash, lineMat))
+    group.add(
+      new THREE.Mesh(mergedDash, new THREE.MeshBasicMaterial({ color: 0xd8e0ea })),
+    )
   }
 
-  const roadLines: number[] = []
-  for (let i = 0; i < CITY.GRID; i += 2) {
-    roadLines.push((i - (CITY.GRID - 1) / 2) * CITY.CELL)
-  }
-
-  return { group, obstacles, roadLines }
+  return { group, obstacles, roads, blocks }
 }
 
-/** Bir nechta BoxGeometry ni bitta geometriyaga birlashtiradi (position + color). */
+/** Bir nechta BoxGeometry ni bitta geometriyaga birlashtiradi (position + normal + uv + color). */
 function mergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
   if (geos.length === 0) return null
   const positions: number[] = []
@@ -274,18 +252,12 @@ function mergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry | n
       positions.push(pos.getX(i), pos.getY(i), pos.getZ(i))
       normals.push(nor ? nor.getX(i) : 0, nor ? nor.getY(i) : 1, nor ? nor.getZ(i) : 0)
       uvs.push(uv ? uv.getX(i) : 0, uv ? uv.getY(i) : 0)
-      if (col) {
-        colors.push(col.getX(i), col.getY(i), col.getZ(i))
-      } else {
-        colors.push(1, 1, 1)
-      }
+      if (col) colors.push(col.getX(i), col.getY(i), col.getZ(i))
+      else colors.push(1, 1, 1)
     }
     const idx = geo.index
-    if (idx) {
-      for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + offset)
-    } else {
-      for (let i = 0; i < pos.count; i++) indices.push(i + offset)
-    }
+    if (idx) for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + offset)
+    else for (let i = 0; i < pos.count; i++) indices.push(i + offset)
     offset += pos.count
     geo.dispose()
   }

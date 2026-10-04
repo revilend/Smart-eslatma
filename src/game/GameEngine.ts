@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { CITY, buildCity } from './city'
+import { CITY, buildCity, type CityResult } from './city'
 import { CarPhysicsState, SPEED_LIMITS, createCar, stepCar } from './car'
 
 export interface HudState {
@@ -27,7 +27,8 @@ export class GameEngine {
   private car: THREE.Group
   private marker: THREE.Group
   private carState: CarPhysicsState = { speed: 0, heading: 0, x: 0, z: 0 }
-  private obstacles: { minX: number; maxX: number; minZ: number; maxZ: number }[] = []
+  private obstacles: CityResult['obstacles'] = []
+  private roads: number[] = []
   private clock = new THREE.Clock()
   private raf = 0
   private running = false
@@ -84,11 +85,18 @@ export class GameEngine {
     const city = buildCity()
     this.scene.add(city.group)
     this.obstacles = city.obstacles
+    this.roads = city.roads
 
     // ---------- Avtomobil ----------
     this.car = createCar()
     this.scene.add(this.car)
-    this.carState = { speed: 0, heading: Math.PI, x: 0, z: 8 }
+    // Spawn: eng markaziy ko'cha chorrahasida, +Z yo'nalishi bo'ylab
+    this.carState = {
+      speed: 0,
+      heading: 0,
+      x: city.roads[Math.floor(city.roads.length / 2)] ?? 0,
+      z: 0,
+    }
 
     // ---------- Yashil marker ----------
     this.marker = createMarker()
@@ -193,7 +201,7 @@ export class GameEngine {
     const steer = kSteer !== 0 ? kSteer : this.touch.steer
 
     // --- Fizika ---
-    const bounds = CITY.HALF - 2
+    const bounds = CITY.HALF - 4
     const { hit } = stepCar(
       this.carState,
       brake > 0 ? 0 : throttle,
@@ -279,27 +287,51 @@ export class GameEngine {
     window.setTimeout(() => this.pickNewMarker(), 1200)
   }
 
+  /**
+   * Yangi marker joylashuvi: har doim ko'cha markaz chizig'ida,
+   * chorrahadan uzoqda — hech qachon bino ichida qolmaydi.
+   */
   private pickNewMarker() {
-    // Tasodifiy yo'l nuqtasi
-    const lines = [
-      ...Array.from({ length: CITY.GRID }, (_, i) =>
-        (Math.floor(i / 2) - (CITY.GRID - 1) / 4) * CITY.CELL,
-      ),
-    ]
-    const line = lines[Math.floor(Math.random() * lines.length)]
-    const along = (Math.random() - 0.5) * 2 * (CITY.HALF - 6)
-    this.markerPos.set(
-      line + (Math.random() < 0.5 ? 0 : 0),
-      2,
-      along,
-    )
-    // Ikki yo'l kesishganida marker bo'lsin
+    const limit = CITY.HALF - 8
+    // Ko'chaning bir qanoti bo'ylab joylashuv
+    const line = this.roads[Math.floor(Math.random() * this.roads.length)]
+    const along = (Math.random() * 2 - 1) * limit
+    // Marker yo'lning qo'ndagi qirrasida, chorrahadan chetda turadi
+    const lane = (Math.random() < 0.5 ? -1 : 1) * 3.2
+
     if (Math.random() < 0.5) {
-      this.markerPos.set(along, 2, line)
+      // Vertikal ko'cha: X = markaz chizig'i
+      this.markerPos.set(line + lane, 2, along)
+    } else {
+      // Gorizontal ko'cha: Z = markaz chizig'i
+      this.markerPos.set(along, 2, line + lane)
     }
+
+    // Xavfsizlik: agar tasodifiy holatda bino ustida tushsa — qayta urinish
+    if (this.isBlocked(this.markerPos.x, this.markerPos.z)) {
+      this.pickNewMarker()
+      return
+    }
+
     this.marker.position.copy(this.markerPos)
     this.marker.visible = true
     this.markerActive = true
+  }
+
+  /** Berilgan nuqta bino chegarasi ichida yoki ustida joylashganmi? */
+  private isBlocked(x: number, z: number): boolean {
+    const pad = 2.5
+    for (const o of this.obstacles) {
+      if (
+        x > o.minX - pad &&
+        x < o.maxX + pad &&
+        z > o.minZ - pad &&
+        z < o.maxZ + pad
+      ) {
+        return true
+      }
+    }
+    return false
   }
 }
 
