@@ -4,9 +4,9 @@ Three.js bilan qurilgan brauzerli 3D shahar haydash o'yini. Loyiha Vite + React 
 
 ## O'yin nima qiladi
 
-- **Tuzilgan shahar** — 11×11 blokli prospektalar, avtomatik generatsiya qilinuvchi binolar, trotuarlar va ko'cha chiziqlari. Ufqda tuman (fog) effekti.
+- **Katta karta** — 31×31 blokli (~1.18 km²) prospektalar, avtomatik generatsiya qilinuvchi 1200+ bino, trotuarlar va ko'cha chiziqlari. Ufqda tuman (fog) effekti.
 - **Chase kamera** — avtomobil ortidan kuzatib boradi; tezlik oshgan sayin orqada qoladi, banking (mashina yo'lga yonma egiladi).
-- **Arcade fizika** — gaz, tormoz, teskari, tezlikka bog'liq burilish, binolarga urilishda tezlikni yo'qotish va qisqa qarshilik.
+- **Arcade fizika** — gaz, tormoz, teskari, tezlikka bog'liq burilish, binolarga urilishda tezlikni yo'qotish va qisqa qarshilik. To'qnashuv uniform grid orqali tekshiriladi, shuning uchun 1200+ bina bo'lganda ham har kadr tez.
 - **Yashil marker (pickup)** — aylanuvchi neon konus. Uni topib yetib boring: har bir yetkazilma +$25.
 - **Tezlik o'lchagich** — SVG yoy, gradient rang (yashil → sariq → qizil) va real vaqtda km/h.
 - **Mobil tugmalar** — ekranda GAS, REV, ◀, ▶ tugmalari; barmoq bilan bosib turib haydash mumkin.
@@ -46,4 +46,8 @@ src/
 └── index.css           # Tailwind + shrift
 ```
 
-Xotira va samaradorlik uchun binolar, tomlar, deraza lentalari va ko'cha chiziqlari `mergeGeometries` yordamida bitta geometriyaga birlashtiriladi — shuning uchun shaharda minglab obyekt bo'lsa ham render tez ishlaydi.
+Xotira va samaradorlik uchun binolar, tomlar, deraza lentalari, trotuarlar va ko'cha chiziqlari `mergeGeometries` yordamida **chunk** (4×4 blok) bo'yicha birlashtiriladi. Shu tarzda:
+
+- bir katta mesh o'rniga ~321 ta kichik mesh — **frustum culling ishlaydi**, ko'rinmaydigan qismlar render qilinmaydi;
+- to'qnashuv **uniform grid** indeksi orqali tekshiriladi — kadrda 1266 bina o'rniga o'rtacha ~12 ta yaqin bina ko'rib chiqiladi;
+- quyosh nishoni mashinani kuzatadi, shuning uchun soya karta chekka qismida ham aniq qoladi.

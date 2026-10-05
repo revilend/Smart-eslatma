@@ -29,6 +29,9 @@ export class GameEngine {
   private carState: CarPhysicsState = { speed: 0, heading: 0, x: 0, z: 0 }
   private obstacles: CityResult['obstacles'] = []
   private roads: number[] = []
+  private sun!: THREE.DirectionalLight
+  /** Binolarning uniform grid indeksi (to'qnashuv tezligi uchun). */
+  private obstacleGrid = new Map<string, CityResult['obstacles']>()
   private clock = new THREE.Clock()
   private raf = 0
   private running = false
@@ -60,25 +63,32 @@ export class GameEngine {
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
-    this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, 900)
+    this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, CITY.HALF * 3)
 
     // ---------- Sahna muhiti ----------
     this.scene.background = new THREE.Color(0x9fc6e8)
-    this.scene.fog = new THREE.Fog(0x9fc6e8, 90, 340)
+    // Katta kartada ufq chizig'i ko'rinishi uchun tuman oralig'i kengaytirilgan
+    this.scene.fog = new THREE.Fog(0x9fc6e8, 140, 420)
 
-    // Quyosh
+    // Quyosh — soya ortidan quyidagi yo'nalishda
     const sun = new THREE.DirectionalLight(0xfff4dd, 2.1)
     sun.position.set(60, 90, 40)
     sun.castShadow = true
     sun.shadow.mapSize.set(2048, 2048)
-    const d = 90
+    // Faqat mashina atrofidagi soyalar — karta kattalashganda ham aniq
+    const d = 70
     sun.shadow.camera.left = -d
     sun.shadow.camera.right = d
     sun.shadow.camera.top = d
     sun.shadow.camera.bottom = -d
-    sun.shadow.camera.far = 400
+    sun.shadow.camera.far = 300
     sun.shadow.bias = -0.0006
+    // Quyosh va uning nishoni mashinaga har kadrda ko'chadi, shunda
+    // karta chekka qismida ham soya to'g'ri tushadi
+    sun.target.position.set(0, 0, 0)
     this.scene.add(sun)
+    this.scene.add(sun.target)
+    this.sun = sun
     this.scene.add(new THREE.HemisphereLight(0xbfe0ff, 0x2a3140, 1.15))
 
     // ---------- Shahar ----------
@@ -86,6 +96,7 @@ export class GameEngine {
     this.scene.add(city.group)
     this.obstacles = city.obstacles
     this.roads = city.roads
+    this.buildObstacleGrid()
 
     // ---------- Avtomobil ----------
     this.car = createCar()
@@ -207,7 +218,7 @@ export class GameEngine {
       brake > 0 ? 0 : throttle,
       steer,
       dt,
-      this.obstacles,
+      this.obstaclesNear(this.carState.x, this.carState.z),
       bounds,
     )
     if (brake > 0) {
@@ -221,6 +232,11 @@ export class GameEngine {
 
     // --- Model transform ---
     this.car.position.set(this.carState.x, 0, this.carState.z)
+
+    // Quyoshni mashinaga ergashtiramiz (karta katta, soya kichik oynada)
+    this.sun.position.set(this.carState.x + 60, 90, this.carState.z + 40)
+    this.sun.target.position.set(this.carState.x, 0, this.carState.z)
+    this.sun.target.updateMatrixWorld()
     this.car.rotation.y = this.carState.heading
     // Yo'l qatlami bo'ylab engilish ( banking )
     const bank = THREE.MathUtils.clamp(-steer * 0.16, -0.18, 0.18)
@@ -318,10 +334,29 @@ export class GameEngine {
     this.markerActive = true
   }
 
-  /** Berilgan nuqta bino chegarasi ichida yoki ustida joylashganmi? */
+  /**
+   * Berilgan nuqtaga yaqin binolar (uniform grid orqali).
+   * 1300+ bina bo'lganda har kadrda hammasini skanlash o'rniga
+   * faqat yaqin kataklar tekshiriladi.
+   */
+  private obstaclesNear(x: number, z: number): CityResult['obstacles'] {
+    const list: CityResult['obstacles'] = []
+    const cellSize = CITY.CELL
+    const cx = Math.floor((x + CITY.HALF) / cellSize)
+    const cz = Math.floor((z + CITY.HALF) / cellSize)
+    for (let gz = cz - 1; gz <= cz + 1; gz++) {
+      for (let gx = cx - 1; gx <= cx + 1; gx++) {
+        const bucket = this.obstacleGrid.get(`${gx}|${gz}`)
+        if (bucket) list.push(...bucket)
+      }
+    }
+    return list
+  }
+
+  /** Tinch holatda nuqta bino chegarasi ichida yoki ustida joylashganmi? */
   private isBlocked(x: number, z: number): boolean {
     const pad = 2.5
-    for (const o of this.obstacles) {
+    for (const o of this.obstaclesNear(x, z)) {
       if (
         x > o.minX - pad &&
         x < o.maxX + pad &&
@@ -332,6 +367,29 @@ export class GameEngine {
       }
     }
     return false
+  }
+
+  /** Binolarni katak (katak o'lchami = CITY.CELL) bo'yicha indekslaydi. */
+  private buildObstacleGrid() {
+    const cellSize = CITY.CELL
+    for (const o of this.obstacles) {
+      // Bino chegarasini qamrab oladigan barcha kataklarga qo'shamiz
+      const gx0 = Math.floor((o.minX + CITY.HALF) / cellSize)
+      const gx1 = Math.floor((o.maxX + CITY.HALF) / cellSize)
+      const gz0 = Math.floor((o.minZ + CITY.HALF) / cellSize)
+      const gz1 = Math.floor((o.maxZ + CITY.HALF) / cellSize)
+      for (let gz = gz0; gz <= gz1; gz++) {
+        for (let gx = gx0; gx <= gx1; gx++) {
+          const key = `${gx}|${gz}`
+          let bucket = this.obstacleGrid.get(key)
+          if (!bucket) {
+            bucket = []
+            this.obstacleGrid.set(key, bucket)
+          }
+          bucket.push(o)
+        }
+      }
+    }
   }
 }
 
