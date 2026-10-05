@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { CITY, buildCity, type CityResult } from './city'
+import { CITY, buildCity, spawnPoint, type CityResult } from './city'
 import { CarPhysicsState, SPEED_LIMITS, createCar, stepCar } from './car'
 
 export interface HudState {
@@ -101,13 +101,9 @@ export class GameEngine {
     // ---------- Avtomobil ----------
     this.car = createCar()
     this.scene.add(this.car)
-    // Spawn: eng markaziy ko'cha chorrahasida, +Z yo'nalishi bo'ylab
-    this.carState = {
-      speed: 0,
-      heading: 0,
-      x: city.roads[Math.floor(city.roads.length / 2)] ?? 0,
-      z: 0,
-    }
+    // Spawn nuqtasi shahar generatsiyasi bilan bitta manbadan keladi
+    const spawn = spawnPoint()
+    this.carState = { speed: 0, ...spawn }
 
     // ---------- Yashil marker ----------
     this.marker = createMarker()
