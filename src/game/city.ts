@@ -32,6 +32,12 @@ const CHUNK_BLOCKS = 6
 const PROP_OFFSET = CITY.ROAD / 2 + 2
 /** To'xtagan mashinalar yo'l chetida, ichki chiziqda. */
 const PARKED_OFFSET = CITY.ROAD / 2 - 1.5
+/**
+ * Blok chetida trotuvar uchun qoldiriladigan minimal joy.
+ * Binolar shundan yaqinlashmaydi — aks holda piyodalar yuradigan
+ * lenta bino ichiga tushadi.
+ */
+export const SIDEWALK_CLEARANCE = 4.5
 
 /** i-chindagi blok yoki ko'cha markazining koordinatasi. */
 export function axisAt(i: number, cell: number, grid: number): number {
@@ -191,12 +197,16 @@ export function buildCity(seed = 20240711): CityResult {
       const lots = rand() < 0.35 ? 2 : 1
 
       for (let k = 0; k < lots; k++) {
-        const w = 8 + rand() * 7
-        const d = 8 + rand() * 7
+        const w = 8 + rand() * 6
+        const d = 8 + rand() * 6
         const h = 10 + rand() * 24 + centrality * rand() * 48
 
-        const offX = lots === 1 ? 0 : k === 0 ? -4.6 : 4.6
-        const offZ = (rand() - 0.5) * 2
+        // Bino blok markazidan SIDEWALK_CLEARANCE ichkarida qolishi shart —
+        // aks holda u ko'chaga yopishib, trotuarda yurishga joy qolmaydi.
+        const reach = CITY.BLOCK / 2 - SIDEWALK_CLEARANCE
+        const maxOff = Math.max(0, reach - Math.max(w, d) / 2)
+        const offX = lots === 1 ? 0 : (k === 0 ? -1 : 1) * Math.min(4.2, maxOff)
+        const offZ = (rand() - 0.5) * 2 * Math.min(2, maxOff)
         const x = cx + offX
         const z = cz + offZ
 

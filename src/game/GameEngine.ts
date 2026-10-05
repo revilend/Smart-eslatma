@@ -1,6 +1,9 @@
 import * as THREE from 'three'
 import { CITY, buildCity, spawnPoint, type CityResult } from './city'
 import { CarPhysicsState, SPEED_LIMITS, createCar, stepCar } from './car'
+import { TrafficSystem } from './traffic'
+import { PedestrianSystem } from './pedestrians'
+import type { MinimapState } from '../components/Minimap'
 
 export interface HudState {
   speed: number
@@ -32,6 +35,10 @@ export class GameEngine {
   private sun!: THREE.DirectionalLight
   /** Binolarning uniform grid indeksi (to'qnashuv tezligi uchun). */
   private obstacleGrid = new Map<string, CityResult['obstacles']>()
+  /** AI mashinalar (ko'chada haydaydi). */
+  private traffic!: TrafficSystem
+  /** Piyodalar (tro-tuarda yuradi). */
+  private pedestrians!: PedestrianSystem
   private clock = new THREE.Clock()
   private raf = 0
   private running = false
@@ -53,6 +60,7 @@ export class GameEngine {
   constructor(
     private canvas: HTMLCanvasElement,
     private onHud: (hud: HudState) => void,
+    private minimapRef: React.MutableRefObject<MinimapState | null>,
   ) {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -109,6 +117,10 @@ export class GameEngine {
     this.marker = createMarker()
     this.scene.add(this.marker)
     this.pickNewMarker()
+
+    // ---------- Jonli shahar: AI mashinalar va piyodalar ----------
+    this.traffic = new TrafficSystem(this.scene, this.roads, this.carState)
+    this.pedestrians = new PedestrianSystem(this.scene, this.roads, this.carState)
 
     this.attachEvents()
     this.resize()
@@ -240,6 +252,50 @@ export class GameEngine {
     // Gaz bosilganda oldinga yengilgan egilish
     this.car.rotation.x = THREE.MathUtils.clamp(-throttle * 0.035, -0.05, 0.05)
 
+    // --- AI mashinalar (ko'chada) ---
+    // Ular binolardan o'ta olmasligi uchun "blocked" ga statik obyektlar
+    // va boshqa AI mashinalari beriladi (bir-birining ustiga bosmaydi).
+    const cars = this.traffic.cars
+    const isBlockedAt = (x: number, z: number) => {
+      if (this.isBlocked(x, z)) return true
+      for (const c of cars) {
+        const dx = c.x - x
+        const dz = c.z - z
+        if (dx * dx + dz * dz < 16) return true
+      }
+      return false
+    }
+    const trafficResult = this.traffic.update(dt, this.carState, isBlockedAt)
+    if (trafficResult.hitPlayer) {
+      this.hitFlash = Math.min(1, this.hitFlash + 0.35)
+      // To'qnashuvda tezlikni yo'qotamiz
+      this.carState.speed *= 0.75
+    }
+
+    // --- Piyodalar (tro-tuarda) ---
+    // Piyodalar uchun torroq tekshiruv (tana kengligi), aks holda ular
+    // binolar yaqinida turib qolishi mumkin bo'lardi.
+    this.pedestrians.update(
+      dt,
+      this.carState,
+      this.roads,
+      (x, z, rx, rz) => this.isBlocked(x, z, rx, rz),
+    )
+
+    // --- Minimapa ---
+    if (this.minimapRef.current) {
+      const m = this.minimapRef.current
+      m.playerX = this.carState.x
+      m.playerZ = this.carState.z
+      m.heading = this.carState.heading
+      m.markerX = this.markerPos.x
+      m.markerZ = this.markerPos.z
+      m.markerActive = this.markerActive
+      m.half = CITY.HALF
+      m.traffic.length = 0
+      for (const c of this.traffic.cars) m.traffic.push({ x: c.x, z: c.z })
+    }
+
     // --- Marker ---
     if (this.markerActive) {
       this.marker.rotation.y += dt * 1.8
@@ -349,15 +405,18 @@ export class GameEngine {
     return list
   }
 
-  /** Tinch holatda nuqta bino chegarasi ichida yoki ustida joylashganmi? */
-  private isBlocked(x: number, z: number): boolean {
-    const pad = 2.5
+  /**
+ * Nuqta bino/ob'yekt chegarasi ichida yoki ustida joylashganmi.
+ * `rx`/`rz` — tekshiruv yarim kengligi (turli ob'yektlar uchun turlicha:
+ * mashina kengroq, piyoda tor).
+ */
+  private isBlocked(x: number, z: number, rx = 2.5, rz = 2.5): boolean {
     for (const o of this.obstaclesNear(x, z)) {
       if (
-        x > o.minX - pad &&
-        x < o.maxX + pad &&
-        z > o.minZ - pad &&
-        z < o.maxZ + pad
+        x > o.minX - rx &&
+        x < o.maxX + rx &&
+        z > o.minZ - rz &&
+        z < o.maxZ + rz
       ) {
         return true
       }

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { GameEngine, type HudState } from './game/GameEngine'
 import Speedometer from './components/Speedometer'
 import TouchControls, { type TouchInput } from './components/TouchControls'
+import Minimap, { type MinimapState } from './components/Minimap'
+import { CITY, roadCenters } from './game/city'
 
 const MAX_KMH = 125
 
@@ -31,6 +33,10 @@ function useIsTouchDevice() {
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const engineRef = useRef<GameEngine | null>(null)
+  const minimapRef = useRef<MinimapState | null>({
+    playerX: 0, playerZ: 0, heading: 0, markerX: 0, markerZ: 0,
+    markerActive: true, traffic: [], roads: [], half: 0,
+  })
   const [hud, setHud] = useState<HudState>(INITIAL_HUD)
   const [showTouch, setShowTouch] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -43,10 +49,13 @@ export default function App() {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+    // Minimapa uchun ko'cha tarmog'ini bir marta berib beramiz
+    minimapRef.current!.roads = roadCenters(CITY.CELL, CITY.GRID)
+    minimapRef.current!.half = CITY.HALF
 
     let engine: GameEngine
     try {
-      engine = new GameEngine(canvas, setHud)
+      engine = new GameEngine(canvas, setHud, minimapRef)
     } catch (e) {
       console.error(e)
       setError(
@@ -107,6 +116,11 @@ export default function App() {
             Yetkazilgan: {hud.deliveries}
           </div>
         </div>
+      </div>
+
+      {/* Minimapa (yuqori o'ng burchak) */}
+      <div className="pointer-events-none absolute right-2 top-2 z-20 sm:right-4 sm:top-4">
+        <Minimap stateRef={minimapRef} size={130} />
       </div>
 
       {/* Yuqori o'ng: vazifa + ovoz */}
