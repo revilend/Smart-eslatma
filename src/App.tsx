@@ -40,6 +40,7 @@ export default function App() {
   const [hud, setHud] = useState<HudState>(INITIAL_HUD)
   const [showTouch, setShowTouch] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
   const isTouch = useIsTouchDevice()
 
   useEffect(() => {
@@ -53,22 +54,36 @@ export default function App() {
     minimapRef.current!.roads = roadCenters(CITY.CELL, CITY.GRID)
     minimapRef.current!.half = CITY.HALF
 
-    let engine: GameEngine
-    try {
-      engine = new GameEngine(canvas, setHud, minimapRef)
-    } catch (e) {
-      console.error(e)
-      setError(
-        '3D rendering ishga tushmadi. Brauzeringizda WebGL yoqilganligini tekshiring.',
-      )
-      return
+    // Shahar generatsiyasi ~2 s davom etadi. Agar darhol qilsak,
+    // oq sahifa ko'rinadi. Bitta kadr kechiktirib, avval yuklanish
+    // ekranini chizdiramiz.
+    let cancelled = false
+    requestAnimationFrame(() => {
+      if (cancelled) return
+      start()
+    })
+    function start() {
+      if (cancelled) return
+      const canvas = canvasRef.current
+      if (!canvas) return
+      let engine: GameEngine
+      try {
+        engine = new GameEngine(canvas, setHud, minimapRef)
+      } catch (e) {
+        console.error(e)
+        setError(
+          '3D rendering ishga tushmadi. Brauzeringizda WebGL yoqilganligini tekshiring.',
+        )
+        return
+      }
+      engineRef.current = engine
+      engine.start()
+      setLoading(false)
     }
 
-    engineRef.current = engine
-    engine.start()
-
     return () => {
-      engine.destroy()
+      cancelled = true
+      engineRef.current?.destroy()
       engineRef.current = null
     }
   }, [])
@@ -91,6 +106,21 @@ export default function App() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-sky-200">
+      {/* Yuklanish ekrani — shahar ~2 s davomida generatsiya qilinadi */}
+      {loading && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-sky-300 via-sky-200 to-sand-200">
+          <div className="animate-pulse text-6xl">🏙️</div>
+          <p className="mt-4 text-xl font-bold text-slate-800">Shahar qurilyapti…</p>
+          <p className="mt-1 text-sm font-semibold text-slate-600">
+            Binolar, ko'chalar va tabiat tayyorlanmoqda
+          </p>
+          <div className="mt-5 h-1.5 w-48 overflow-hidden rounded-full bg-slate-300/60">
+            <div className="h-full w-1/3 animate-[loading_1.1s_ease-in-out_infinite] rounded-full bg-slate-700" />
+          </div>
+          <style>{`@keyframes loading{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}`}</style>
+        </div>
+      )}
+
       {/* 3D sahna */}
       <canvas ref={canvasRef} className="absolute inset-0" />
 

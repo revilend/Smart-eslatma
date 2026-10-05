@@ -3,6 +3,7 @@ import { CITY, buildCity, spawnPoint, type CityResult } from './city'
 import { CarPhysicsState, SPEED_LIMITS, createCar, stepCar } from './car'
 import { TrafficSystem } from './traffic'
 import { PedestrianSystem } from './pedestrians'
+import { buildParks, buildTerrain, type TerrainResult } from './terrain'
 import type { MinimapState } from '../components/Minimap'
 
 export interface HudState {
@@ -39,6 +40,8 @@ export class GameEngine {
   private traffic!: TrafficSystem
   /** Piyodalar (tro-tuarda yuradi). */
   private pedestrians!: PedestrianSystem
+  /** Tabiat qatlami (plyaj, suv, tog'lar). */
+  private terrain!: TerrainResult
   private clock = new THREE.Clock()
   private raf = 0
   private running = false
@@ -74,9 +77,9 @@ export class GameEngine {
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, CITY.HALF * 3)
 
     // ---------- Sahna muhiti ----------
-    this.scene.background = new THREE.Color(0x9fc6e8)
-    // Katta kartada ufq chizig'i ko'rinishi uchun tuman oralig'i kengaytirilgan
-    this.scene.fog = new THREE.Fog(0x9fc6e8, 140, 420)
+    this.scene.background = new THREE.Color(0xa8cfe8)
+    // Tog'lar ufqda ko'rinsin, lekin juda uzoqda emas
+    this.scene.fog = new THREE.Fog(0x9fc6e8, 320, 1150)
 
     // Quyosh — soya ortidan quyidagi yo'nalishda
     const sun = new THREE.DirectionalLight(0xfff4dd, 2.1)
@@ -117,6 +120,13 @@ export class GameEngine {
     this.marker = createMarker()
     this.scene.add(this.marker)
     this.pickNewMarker()
+
+    // ---------- Tabiat: plyaj, dengiz, tog'lar va bog'lar ----------
+    const terrain = buildTerrain()
+    this.scene.add(terrain.group)
+    this.terrain = terrain
+    // Bog'lar bloklari — binolar o'rniga ko'kalamdor maydon
+    this.scene.add(buildParks(city.parks))
 
     // ---------- Jonli shahar: AI mashinalar va piyodalar ----------
     this.traffic = new TrafficSystem(this.scene, this.roads, this.carState)
@@ -220,7 +230,8 @@ export class GameEngine {
     const steer = kSteer !== 0 ? kSteer : this.touch.steer
 
     // --- Fizika ---
-    const bounds = CITY.HALF - 4
+    // Mashina suvga tushmasligi uchun chegar plyajning oxirigacha
+    const bounds = this.terrain.limits.beach
     const { hit } = stepCar(
       this.carState,
       brake > 0 ? 0 : throttle,
@@ -304,6 +315,10 @@ export class GameEngine {
       const dz = this.markerPos.z - this.carState.z
       if (dx * dx + dz * dz < 12) this.collectMarker()
     }
+
+    // --- Suv to'lqinlari (juda sekin, faqat vizual) ---
+    const wt = this.terrain.water.material as THREE.MeshStandardMaterial
+    wt.opacity = 0.9 + Math.sin(performance.now() / 1800) * 0.03
 
     // --- Kamera: mashina ortidan chiqib boruvchi (chase) kamera ---
     const back = 15

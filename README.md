@@ -4,7 +4,8 @@ Three.js bilan qurilgan brauzerli 3D shahar haydash o'yini. Loyiha Vite + React 
 
 ## O'yin nima qiladi
 
-- **Ulkan jonli shahar** — 45×45 blokli (~1.71 km) prospektalar, 2700+ bino, ko'cha chiroqlari, daraxtlar, bench'lar va to'xtagan mashinalar. Ufqda tuman effekti.
+- **Katta orol** — 55×55 blokli (~2.1 km) shahar, 3800+ bino, ko'chalar, chiroqlar, daraxtlar va to'xtagan mashinalar.
+- **Tabiat** — shahar atrofida **plyaj** (qum), undan keyin **dengiz** (juda sekin to'lqin animatsiyasi bilan), ufqda **qorli tog'lar**. Markazda shahar ichida **bog'lar** — binolar o'rniga ko'kalamdor maydon, daraxtlar va yo'llar.
 - **AI haydovchilar** — 18 ta mashina ko'cha tarmog'i bo'ylab mustaqil haydaydi: chorrahadan buriladi, oldingi mashina yoki to'sqinlikni ko'rganda sekinlashadi. O'yinchi ularga urilsa, tezlikni yo'qotadi.
 - **Piyodalar** — 60 ta odam tro-tuarda yuradi va mashina yaqinlashsa qochadi. `InstancedMesh` bilan chiziladi, shuning uchun bitta mesh hisoblanadi.
 - **Minimap (radar)** — yuqori o'ng burchakda aylanma xarita: yo'llar, yashil marker, qizil AI mashinalar va markazda o'q o'qi (GTA uslubidagi radar).
@@ -41,7 +42,8 @@ src/
 ├── game/
 │   ├── GameEngine.ts   # sahna, kamera, render loop, marker, HUD holati
 │   ├── car.ts          # avtomobil modeli + arcade fizikasi + to'qnashuv
-│   ├── city.ts         # shahar generatsiyasi, bino/prop geometriyasi
+│   ├── city.ts         # shahar generatsiyasi, bino/prop/bog' geometriyasi
+│   ├── terrain.ts      # plyaj, dengiz, tog'lar va bog'lar
 │   ├── traffic.ts      # AI mashinalar (ko'chada haydaydi, buriladi)
 │   └── pedestrians.ts  # piyodalar (InstancedMesh, trotuarda yuradi)
 ├── components/
@@ -52,10 +54,11 @@ src/
 └── index.css           # Tailwind + shrift
 ```
 
-Xotira va samaradorlik uchun binolar, tomlar, deraza lentalari, trotuarlar, ko'cha chiziqlari va barcha prop'lar `mergeGeometries` yordamida **chunk** (6×6 blok) bo'yicha birlashtiriladi. Shu tarzda:
+Xotira va samaradorlik uchun binolar, tomlar, deraza lentalari, trotuarlar, ko'chalar va barcha prop'lar `mergeGeometries` yordamida **chunk** (6×6 blok) bo'yicha birlashtiriladi. Shu tarzda:
 
-- bir katta mesh o'rniga ~705 ta kichik mesh — **frustum culling ishlaydi**, ko'rinmaydigan qismlar render qilinmaydi;
-- to'qnashuv **uniform grid** indeksi orqali tekshiriladi — 3147 obyekt bo'lganda ham kadrda ~14 ta yaqin obyekt ko'riladi;
+- bir katta mesh o'rniga ~1100 ta kichik mesh — **frustum culling ishlaydi**, ko'rinmaydigan qismlar render qilinmaydi;
+- to'qnashuv **uniform grid** indeksi orqali tekshiriladi — 5000+ obyekt bo'lganda ham kadrda faqat ~15 ta yaqin obyekt ko'riladi;
 - quyosh nishoni mashinani kuzatadi, shuning uchun soya karta chekka qismida ham aniq qoladi;
-- `spawnPoint()` shahar generatsiyasi va dvigatel uchun yagona manba — prop'lar hech qachon spawn ustiga tushmaydi;
-- piyodalar va AI mashinalar o'z **chiziqlariga bog'langan**: AI `ROAD/2 - 3.3` masofada (to'xtagan mashinalardan xavfsiz), piyodalar esa 8–10 m dagi trotuar lentasida — shuning uchun hech qanday ob'yekt ichida qolmaydi.
+- `spawnPoint()` shahar generatsiyasi va dvigatel uchun yagona manba;
+- piyodalar va AI mashinalar o'z **chiziqlariga bog'langan** — shuning uchun hech qanday ob'yekt ichida qolmaydi;
+- shahar generatsiyasi ~2 s davom etadi, shuning uchun **yuklanish ekrani** ko'rsatiladi.

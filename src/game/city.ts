@@ -9,8 +9,13 @@ import * as THREE from 'three'
  * bo'sh (unpaved) bo'lak qolmaydi.
  */
 export const CITY = {
-  /** Blok/ko'cha tarmog'i — karta o'lchamini belgilaydi. */
-  GRID: 45,
+  /**
+ * Blok/ko'cha tarmog'i — karta o'lchamini belgilaydi.
+ * **Toq son** bo'lishi shart: juft sonli GRID da ko'cha markazlari
+ * kvadratning markaziga nisbatan asimmetrik bo'lib qoladi, plyaj
+ * halqasi esa to'g'ri chiqmaydi.
+ */
+  GRID: 55,
   /** Kvadrat o'lchami. */
   BLOCK: 26,
   /** Ko'cha kengligi. */
@@ -19,9 +24,13 @@ export const CITY = {
   get CELL() {
     return this.BLOCK + this.ROAD
   },
-  /** Shahar yarim kengligi (chegara). */
+  /**
+   * Shahar yarim kengligi — tashqi yo'l markazigacha + uning yarim
+   * kengligi. Shu qiymat qaytarilmaydi, aks holda tashqi yo'llardagi
+   * to'xtagan mashinalar plyaj zonasiga tushib qolardi.
+   */
   get HALF() {
-    return ((this.GRID - 1) / 2) * this.CELL + this.CELL / 2
+    return ((this.GRID - 1) / 2) * this.CELL + this.CELL / 2 + this.ROAD / 2
   },
 }
 
@@ -49,10 +58,19 @@ export function axisAt(i: number, cell: number, grid: number): number {
  * `i` juftlab qadamlaydi, shuning uchun qo'shni yo'llar bir markazga
  * to'g'ramaydi.
  */
+/**
+ * Ko'cha markazlari: har bir qo'shni blok markazi orasida bittadan,
+ * hamda shaharning ikki chetida bittadan tashqi yo'l.
+ *
+ * Simmetrik bo'lishi shart — aks holda plyaj halqasi bir tomonda
+ * keng, ikkinchisida tor bo'lib qoladi.
+ */
 export function roadCenters(cell: number, grid: number): number[] {
-  const out: number[] = []
-  for (let i = 0; i <= grid; i += 2) out.push(axisAt(i, cell, grid) - cell / 2)
-  return out
+  const inner: number[] = []
+  // Qo'shni bloklar orasidagi yo'llar: [min, max] simmetrik chiqadi
+  for (let i = 0; i <= grid - 2; i++) inner.push(axisAt(i, cell, grid) + cell / 2)
+  const edge = Math.abs(axisAt(grid - 1, cell, grid) + cell / 2)
+  return [...inner, -edge, edge].sort((a, b) => a - b)
 }
 
 /** Blok markazlari (bino va trotuyar shu yerda turadi). */
@@ -93,6 +111,8 @@ export interface CityResult {
   roads: number[]
   /** Blok markazlari. */
   blocks: number[]
+  /** Bog' bo'lgan bloklar (binolar o'rniga tabiat). */
+  parks: { x: number; z: number }[]
 }
 
 const BUILDING_PALETTE = [
@@ -150,6 +170,7 @@ export function buildCity(seed = 20240711): CityResult {
   const roads = roadCenters(cell, CITY.GRID)
   const blocks = blockCenters(cell, CITY.GRID)
   const limit = CITY.HALF
+  const parks: { x: number; z: number }[] = []
 
   // Chunk indeksini koordinatadan hisoblaydigan yordamchi
   const chunkKey = (cx: number, cz: number) =>
@@ -187,13 +208,25 @@ export function buildCity(seed = 20240711): CityResult {
     for (const cz of blocks) {
       const chunk = chunkOf(cx, cz)
 
+      // --- Bog' bloklari: binolar o'rniga ochiq maydon ---
+      // Markazga yaqinroq bloklarda ko'proq bog' — shaharning yashil zonasi
+      const centrality = 1 - Math.min(1, Math.hypot(cx, cz) / limit)
+      const parkChance = 0.05 + centrality * 0.06
+      if (rand() < parkChance) {
+        parks.push({ x: cx, z: cz })
+        // Bog'ning yaxlit ko'kalamini chizish (trotuar ustiga)
+        const lawn = new THREE.BoxGeometry(CITY.BLOCK, 0.2, CITY.BLOCK)
+        lawn.translate(cx, 0.1, cz)
+        chunk.sidewalks.push(lawn)
+        continue
+      }
+
       // Trotuvar — geometriya sifatida (alohida mesh emas)
       const walk = new THREE.BoxGeometry(CITY.BLOCK, 0.18, CITY.BLOCK)
       walk.translate(cx, 0.09, cz)
       chunk.sidewalks.push(walk)
 
       // Markazda balandroq, chetlarda past — gorizont chiziladi
-      const centrality = 1 - Math.min(1, Math.hypot(cx, cz) / limit)
       const lots = rand() < 0.35 ? 2 : 1
 
       for (let k = 0; k < lots; k++) {
@@ -231,7 +264,10 @@ export function buildCity(seed = 20240711): CityResult {
         chunk.roofs.push(roof)
 
         // --- Deraza lentalari ---
-        for (let wy = 3; wy < h - 1.5; wy += 3.2) {
+        // Baland binolarda lentalar kamroq: uzinflik bo'lsa ham
+        // 2.1M verteksdan oshmasligi kerak (GPU yuklamasi).
+        const bandStep = h > 45 ? 5.2 : 3.4
+        for (let wy = 3; wy < h - 1.5; wy += bandStep) {
           const band = new THREE.BoxGeometry(w + 0.12, 0.3, d + 0.12)
           band.translate(x, wy + 0.18, z)
           chunk.windows.push(band)
@@ -400,7 +436,7 @@ export function buildCity(seed = 20240711): CityResult {
     add(chunk.parked, matParked, true)
   }
 
-  return { group, obstacles, roads, blocks }
+  return { group, obstacles, roads, blocks, parks }
 }
 
 /** Bir nechta BoxGeometry ni bitta geometriyaga birlashtiradi (position + normal + uv + color). */
